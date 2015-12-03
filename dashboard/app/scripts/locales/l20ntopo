@@ -237,6 +237,12 @@ if __name__ == '__main__':
         usage(prgname)
         sys.exit(2)
     if output != None:
+        dir = os.path.dirname(output)
+        if len(dir) > 0:
+            if not os.path.exists(dir):
+                os.makedirs(dir, 0755)
+            elif os.path.isfile(dir):
+                sys.exit('"%s" is not directory for output' % dir)
         od = codecs.open(output, 'w', encoding='utf-8')
     else:
         od = codecs.getwriter('utf-8')(sys.stdout)
