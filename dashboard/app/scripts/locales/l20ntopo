@@ -45,10 +45,10 @@ Usage:
   %s [--input=L20N_FILE | --help] [OPTION...]
 
 Options:
-  --help                             Show this message
-  --input=L20N_FILE                  Parsed L20N_FILE to convert to PO file
-  --output=PO_FILE                   Output PO_FILE (default is stdout)
-  --reverse                          Convert PO file to L20N file instead
+  -h, --help                         Show this message
+  -i, --input=L20N_FILE              Parsed L20N_FILE to convert to PO file
+  -o, --output=PO_FILE               Output PO_FILE (default is stdout)
+  -r, --reverse                      Convert PO file to L20N file instead
 ''' % prgname)
 
 def print_po_header(od):
