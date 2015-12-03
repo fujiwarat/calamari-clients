@@ -59,6 +59,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\\n"
 "Content-Transfer-Encoding: 8bit\\n"
 "Plural-Forms: nplurals=1; plural=0;\\n"
+
 '''
 
 def usage(prgname):
@@ -83,12 +84,8 @@ def print_po_header(od):
         today += "+%.2d%.2d" % (utc_h, utc_m)
     else:
         today += "-%.2d%.2d" % (utc_h, utc_m)
-    if od != None:
-        od.write((PO_HEADER_FORMAT + '\n') % \
-                (today, today, PO_TRANSLATOR, PO_LANG_TEAM, PO_LANG))
-    else:
-        print(PO_HEADER_FORMAT % \
-                (today, today, PO_TRANSLATOR, PO_LANG_TEAM, PO_LANG))
+    od.write(PO_HEADER_FORMAT % \
+            (today, today, PO_TRANSLATOR, PO_LANG_TEAM, PO_LANG))
 
 def input_file(path):
     file = codecs.open(path, 'r', encoding='utf-8')
@@ -117,14 +114,9 @@ def long_msgid_l20n_to_po(msgid):
     return '\"\n"' + msgid.replace('\n', '\\n\"\n\"')
 
 def print_po_msgid(od, msgctxt, msgid, msgstr=""):
-    if od != None:
-        od.write('msgctxt "%s"\n' % msgctxt)
-        od.write('msgid "%s"\n' % msgid)
-        od.write('msgstr "%s"\n\n' % msgstr)
-    else:
-        print('msgctxt "%s"' % msgctxt)
-        print('msgid "%s"' % msgid)
-        print('msgstr "%s"\n' % msgstr)
+    od.write('msgctxt "%s"\n' % msgctxt)
+    od.write('msgid "%s"\n' % msgid)
+    od.write('msgstr "%s"\n\n' % msgstr)
 
 def po_to_l20n(text, od):
     while len(text) > 0:
@@ -195,22 +187,19 @@ def po_to_l20n(text, od):
                     else:
                         sys.exit('Error msgstr single Format: %s, %s' % (msgid, text))
                 if len(msgstr) == 0:
-                    msgstr = msgid
-                    msgstr_multi_lines = msgid_multi_lines
-                if len(msgstr) == 0:
                     msgstr_multi_lines = False
                 if msgstr_multi_lines:
                     msgstr = long_msgid_po_to_l20n(msgstr)
+                if len(msgstr) == 0:
+                    msgstr = msgid
+                    msgstr_multi_lines = msgid_multi_lines
                 if msgctxt == None:
                     if len(msgid) > 0:
                         sys.exit('msgctxt not found: %s, %s' % (msgid, text))
                     else:
                         # THIS IS PO HEADER
                         continue
-                if od != None:
-                    od.write('<%s "%s">\n' % (msgctxt, msgstr))
-                else:
-                    print('<%s "%s">' % (msgctxt, msgstr))
+                od.write('<%s "%s">\n' % (msgctxt, msgstr))
             else:
                 sys.exit('Error msgstr multi Format: %s' % text)
 
@@ -249,6 +238,8 @@ if __name__ == '__main__':
         sys.exit(2)
     if output != None:
         od = codecs.open(output, 'w', encoding='utf-8')
+    else:
+        od = codecs.getwriter('utf-8')(sys.stdout)
     text = input_file(input)
     if not reverse:
         print_po_header(od)
