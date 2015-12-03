@@ -1,0 +1,237 @@
+#!/usr/bin/python
+
+import codecs
+import getopt
+import os
+import re
+import sys
+import time
+
+from datetime import datetime
+
+L20N_SINGLE_FORMAT = '<(?P<ctxt>\w+)\W+\"(?P<id>[^\"]*)\">\W*\n'
+L20N_MULTI_FORMAT = \
+        '<(?P<ctxt>\w+)\W+\"\"\"\W*\n(?P<id>[^\"]*)\n\W*\"\"\">\W*\n'
+PO_TRANSLATOR = 'Takao Fujiwara <tfujiwar@redhat.com>'
+PO_LANG_TEAM = 'Source'
+PO_LANG = 'en'
+PO_MSGCTXT_FORMAT = 'msgctxt[^\"]*\"(?P<ctxt>[^\"]*)\"\W*\n'
+PO_MSGID_NULL_FORMAT = 'msgid[^\"]*\"\"\W*\n'
+PO_MSGID_SINGLE_FORMAT = 'msgid[^\"]*\"(?P<id>[^\"]*)\"\W*\n'
+PO_MSGID_MULTI_FORMAT = '\"(?P<id>[^\"]*)\"\W*\n'
+PO_MSGSTR_NULL_FORMAT = 'msgstr[^\"]*\"\"\n'
+PO_MSGSTR_SINGLE_FORMAT = 'msgstr[^\"]*\"(?P<str>[^\"]*)\"\n'
+PO_MSGSTR_MULTI_FORMAT = '\"(?P<str>[^\"]*)\"\n'
+
+PO_HEADER_FORMAT = '''\
+msgid ""
+msgstr ""
+"Project-Id-Version: calamari-clients master\\n"
+"Report-Msgid-Bugs-To: https://github.com/ceph/calamari-clients/issues\\n"
+"POT-Creation-Date: %s\\n"
+"PO-Revision-Date: %s\\n"
+"Last-Translator: %s\\n"
+"Language-Team: %s\\n"
+"Language: %s\\n"
+"MIME-Version: 1.0\\n"
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Content-Transfer-Encoding: 8bit\\n"
+"Plural-Forms: nplurals=1; plural=0;\\n"
+'''
+
+def usage(prgname):
+    print('''\
+Usage:
+  %s [--input=L20N_FILE | --help] [OPTION...]
+
+Options:
+  --help                             Show this message
+  --input=L20N_FILE                  Parsed L20N_FILE to convert to PO file
+  --output=PO_FILE                   Output PO_FILE (default is stdout)
+  --reverse                          Convert PO file to L20N file instead
+''' % prgname)
+
+def print_po_header(od):
+    is_dst = time.daylight and time.localtime().tm_isdst > 0
+    utc_offset = - (time.altzone if is_dst else time.timezone)
+    utc_h = utc_offset / 60 / 60
+    utc_m = utc_offset / 60 % 60
+    today = datetime.today().strftime('%Y-%m-%d %H:%M:%S')
+    if utc_offset >= 0:
+        today += "+%.2d%.2d" % (utc_h, utc_m)
+    else:
+        today += "-%.2d%.2d" % (utc_h, utc_m)
+    if od != None:
+        od.write((PO_HEADER_FORMAT + '\n') % \
+                (today, today, PO_TRANSLATOR, PO_LANG_TEAM, PO_LANG))
+    else:
+        print(PO_HEADER_FORMAT % \
+                (today, today, PO_TRANSLATOR, PO_LANG_TEAM, PO_LANG))
+
+def input_file(path):
+    file = codecs.open(path, 'r', encoding='utf-8')
+    return file.read()
+
+def l20n_to_po(text, od):
+    if text.startswith("<"):
+        while len(text) > 0:
+            m = re.match(L20N_SINGLE_FORMAT, text)
+            if m:
+                print_po_msgid(od, m.group('ctxt'), m.group('id'))
+                text = text[m.end():]
+            else:
+                m = re.match(L20N_MULTI_FORMAT, text)
+                if m:
+                    print_po_msgid(od,
+                                   m.group('ctxt'),
+                                   long_msgid_l20n_to_po(m.group('id')))
+                    text = text[m.end():]
+                else:
+                    sys.exit('Error Format: %s' % text)
+    else:
+        sys.exit('Error Format without <: %s' % text)
+
+def long_msgid_l20n_to_po(msgid):
+    return '\"\n"' + msgid.replace('\n', '\\n\"\n\"')
+
+def print_po_msgid(od, msgctxt, msgid, msgstr=""):
+    if od != None:
+        od.write('msgctxt "%s"\n' % msgctxt)
+        od.write('msgid "%s"\n' % msgid)
+        od.write('msgstr "%s"\n\n' % msgstr)
+    else:
+        print('msgctxt "%s"' % msgctxt)
+        print('msgid "%s"' % msgid)
+        print('msgstr "%s"\n' % msgstr)
+
+def po_to_l20n(text, od):
+    while len(text) > 0:
+        msgctxt = None
+        msgid = None
+        msgstr = None
+        msgid_multi_lines = False
+        msgstr_multi_lines = False
+        if text.startswith('#'):
+            m = re.match('#.*\n', text)
+            if m:
+                text = text[m.end():]
+            else:
+                sys.exit('Error Comment Format: %s' % text)
+        if text.startswith('\n'):
+            text = text[1:]
+        if text.startswith('msgctxt'):
+            m = re.match(PO_MSGCTXT_FORMAT, text)
+            if m:
+                msgctxt = m.group('ctxt')
+                text = text[m.end():]
+            else:
+                sys.exit('Error msgctxt Format: %s' % text)
+        if text.startswith('msgid'):
+            m = re.match(PO_MSGID_NULL_FORMAT, text)
+            if m:
+                msgid_multi_lines = True
+            else:
+                m = re.match(PO_MSGID_SINGLE_FORMAT, text)
+            if m:
+                if not msgid_multi_lines:
+                    msgid = m.group('id')
+                else:
+                    msgid = ""
+                text = text[m.end():]
+                while text.startswith('\"'):
+                    m = re.match(PO_MSGID_MULTI_FORMAT, text)
+                    if m:
+                        msgid_multi_lines = True
+                        msgid += m.group('id')
+                        text = text[m.end():]
+                    else:
+                        sys.exit('Error msgid multi Format: %s, %s' % msgid, text)
+                if len(msgid) == 0:
+                    msgid_multi_lines = False
+                if msgid_multi_lines:
+                    msgid = long_msgid_po_to_l20n(msgid)
+            else:
+                sys.exit('Error msgid single Format: %s' % text)
+        if text.startswith('msgstr'):
+            m = re.match(PO_MSGSTR_NULL_FORMAT, text)
+            if m:
+                msgstr_multi_lines = True
+            else:
+                m = re.match(PO_MSGSTR_SINGLE_FORMAT, text)
+            if m:
+                if not msgstr_multi_lines:
+                    msgstr = m.group('str')
+                else:
+                    msgstr = ""
+                text = text[m.end():]
+                while text.startswith('\"'):
+                    m = re.match(PO_MSGSTR_MULTI_FORMAT, text)
+                    if m:
+                        msgstr_multi_lines = True
+                        msgstr += m.group('str')
+                        text = text[m.end():]
+                    else:
+                        sys.exit('Error msgstr single Format: %s, %s' % (msgid, text))
+                if len(msgstr) == 0:
+                    msgstr = msgid
+                    msgstr_multi_lines = msgid_multi_lines
+                if len(msgstr) == 0:
+                    msgstr_multi_lines = False
+                if msgstr_multi_lines:
+                    msgstr = long_msgid_po_to_l20n(msgstr)
+                if msgctxt == None:
+                    if len(msgid) > 0:
+                        sys.exit('msgctxt not found: %s, %s' % (msgid, text))
+                    else:
+                        # THIS IS PO HEADER
+                        continue
+                if od != None:
+                    od.write('<%s "%s">\n' % (msgctxt, msgstr))
+                else:
+                    print('<%s "%s">' % (msgctxt, msgstr))
+            else:
+                sys.exit('Error msgstr multi Format: %s' % text)
+
+def long_msgid_po_to_l20n(msgid):
+    return '\"\"\n' + msgid.replace('\\n', '\n') + '\n\"\"'
+
+if __name__ == '__main__':
+    prgname = os.path.basename(sys.argv[0])
+    try:
+        opts, args = getopt.getopt(sys.argv[1:],
+                                   'i:ho:r',
+                                   ['input=', 'help', 'output=', 'reverse'])
+    except getopt.GetoptError as err:
+        print(err)
+        usage(prgname)
+        sys.exit(2)
+    input = None
+    output = None
+    od = None
+    reverse = False
+    for opt, arg in opts:
+        if opt in ('-h', '--help'):
+            usage(prgname)
+            sys.exit()
+        elif opt in ('-i', '--input'):
+            input = arg
+        elif opt in ('-o', '--output'):
+            output = arg
+        elif opt in ('-r', '--reverse'):
+            reverse = True
+        else:
+            sys.exit('Unhandled option %s' % opt)
+    if input == None:
+        print("The file path of l20n is required.")
+        usage(prgname)
+        sys.exit(2)
+    if output != None:
+        od = codecs.open(output, 'w', encoding='utf-8')
+    text = input_file(input)
+    if not reverse:
+        print_po_header(od)
+        l20n_to_po(text, od)
+    else:
+        po_to_l20n(text, od)
+    if od != None:
+        od.close()
