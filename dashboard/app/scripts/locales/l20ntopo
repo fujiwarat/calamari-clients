@@ -24,12 +24,15 @@
 
 import codecs
 import getopt
+import io
 import os
 import re
 import sys
 import time
 
 from datetime import datetime
+
+PY3K = sys.version_info >= (3, 0)
 
 L20N_SINGLE_FORMAT = '<(?P<ctxt>\w+)\W+\"(?P<id>[^\"]*)\">\W*\n'
 L20N_MULTI_FORMAT = \
@@ -45,7 +48,9 @@ PO_MSGSTR_NULL_FORMAT = 'msgstr[^\"]*\"\"\n'
 PO_MSGSTR_SINGLE_FORMAT = 'msgstr[^\"]*\"(?P<str>[^\"]*)\"\n'
 PO_MSGSTR_MULTI_FORMAT = '\"(?P<str>[^\"]*)\"\n'
 
-PO_HEADER_FORMAT = '''\
+PO_HEADER_FORMAT = u'''\
+# Copyright © 2015%s Red Hat, Inc.
+# This file is distributed under the same license as the package.
 msgid ""
 msgstr ""
 "Project-Id-Version: calamari-clients master\\n"
@@ -71,21 +76,26 @@ Options:
   -h, --help                         Show this message
   -i, --input=L20N_FILE              Parsed L20N_FILE to convert to PO file
   -o, --output=PO_FILE               Output PO_FILE (default is stdout)
+  -t, --translator=PO_TRANSLATOR     Specify PO_TRANSLATOR (default is
+                                     "%s")
   -r, --reverse                      Convert PO file to L20N file instead
-''' % prgname)
+''' % (prgname, PO_TRANSLATOR))
 
-def print_po_header(od):
+def print_po_header(od, translator):
     is_dst = time.daylight and time.localtime().tm_isdst > 0
     utc_offset = - (time.altzone if is_dst else time.timezone)
     utc_h = utc_offset / 60 / 60
     utc_m = utc_offset / 60 % 60
     today = datetime.today().strftime('%Y-%m-%d %H:%M:%S')
+    to_year = '-' + datetime.today().strftime('%Y')
+    if to_year == '-2015':
+        to_year = ''
     if utc_offset >= 0:
         today += "+%.2d%.2d" % (utc_h, utc_m)
     else:
         today += "-%.2d%.2d" % (utc_h, utc_m)
     od.write(PO_HEADER_FORMAT % \
-            (today, today, PO_TRANSLATOR, PO_LANG_TEAM, PO_LANG))
+            (to_year, today, today, translator, PO_LANG_TEAM, PO_LANG))
 
 def input_file(path):
     file = codecs.open(path, 'r', encoding='utf-8')
@@ -210,8 +220,9 @@ if __name__ == '__main__':
     prgname = os.path.basename(sys.argv[0])
     try:
         opts, args = getopt.getopt(sys.argv[1:],
-                                   'i:ho:r',
-                                   ['input=', 'help', 'output=', 'reverse'])
+                                   'i:ho:rt:',
+                                   ['input=', 'help', 'output=', 'reverse',
+                                    'translator'])
     except getopt.GetoptError as err:
         print(err)
         usage(prgname)
@@ -220,6 +231,7 @@ if __name__ == '__main__':
     output = None
     od = None
     reverse = False
+    translator = PO_TRANSLATOR
     for opt, arg in opts:
         if opt in ('-h', '--help'):
             usage(prgname)
@@ -230,6 +242,11 @@ if __name__ == '__main__':
             output = arg
         elif opt in ('-r', '--reverse'):
             reverse = True
+        elif opt in ('-t', '--translator'):
+            if PY3K:
+                translator = arg
+            else:
+                translator = unicode(arg, 'utf-8')
         else:
             sys.exit('Unhandled option %s' % opt)
     if input == None:
@@ -240,15 +257,18 @@ if __name__ == '__main__':
         dir = os.path.dirname(output)
         if len(dir) > 0:
             if not os.path.exists(dir):
-                os.makedirs(dir, 0755)
+                os.makedirs(dir, 0o755)
             elif os.path.isfile(dir):
                 sys.exit('"%s" is not directory for output' % dir)
         od = codecs.open(output, 'w', encoding='utf-8')
     else:
-        od = codecs.getwriter('utf-8')(sys.stdout)
+        if PY3K:
+            od = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        else:
+            od = codecs.getwriter('utf-8')(sys.stdout)
     text = input_file(input)
     if not reverse:
-        print_po_header(od)
+        print_po_header(od, translator)
         l20n_to_po(text, od)
     else:
         po_to_l20n(text, od)
